@@ -2,6 +2,16 @@
 
 Export Android TV Watch Next records for the current and legacy SmartTube package IDs into JSON and CSV files. This is a local, one-time export. It does not use a phone, modify SmartTube, or run a sync service.
 
+## Screenshots
+
+The first image shows the Google TV Play next row. Recommendation artwork is blurred to avoid publishing personal viewing history.
+
+![Google TV Play next row with personal recommendation artwork blurred](assets/play-next-redacted.png)
+
+This is the Android full-backup confirmation prompt shown on the TV when ADB requests a provider backup. A restore request may show a separate confirmation prompt, depending on the Android build.
+
+![Android full-backup confirmation prompt on the TV](assets/adb-backup-confirmation.png)
+
 ## Required tools
 
 - Android SDK Platform-Tools, with ADB available on the computer. ADB is required to connect to the TV and capture its provider backup.
@@ -79,6 +89,57 @@ The manifest records the source archive hash, database checks, and row counts. I
 ## Local data and privacy
 
 The exports/ directory contains the raw Android backup and viewing records. It is excluded by .gitignore. Keep these files private and do not commit or upload them.
+
+## Remove all Watch Next data
+
+The optional clear workflow prepares a new provider backup with every row removed from `watch_next_programs`, then restores that snapshot to the TV. This table is shared by apps, so this clears Watch Next items from all apps, not only SmartTube. Apps may add new items again later.
+
+Restoring replaces the TV provider's data with the snapshot made by this workflow. Changes made to that provider after the snapshot may be overwritten. Keep the original backup until you have verified the result. The workflow refuses to overwrite existing output files and requires a typed confirmation before restore.
+
+ADB backup support varies by device and Android version. This workflow was exercised on one Android 9 TV. On Android 12 and later, `adb backup` restricts app data for apps targeting Android 12 or later, so the TV provider database may not be included. The script stops if it cannot find and validate the database. See the [Android 12 backup behavior changes](https://developer.android.com/about/versions/12/behavior-changes-12#adb-backup-restrictions).
+
+### 1. Prepare a fresh cleared backup
+
+Connect and authorize the TV as described above, then run:
+
+```sh
+python3 clear_watch_next.py prepare --device TV_IP:5555
+```
+
+Approve the full backup request on the TV. The script saves these files under `exports/clear-watch-next/`:
+
+- `com.android.providers.tv.original.ab`, the fresh source backup for recovery
+- `com.android.providers.tv.watch-next-cleared.ab`, the prepared restore backup
+- `watch-next-clear-manifest.json`, row counts and validation hashes
+
+The script validates the SQLite database before and after the edit, confirms that no Watch Next rows remain in the prepared backup, and checks that row counts in the other database tables did not change. It updates only the `watch_next_programs` table in the backup.
+
+### 2. Restore the prepared backup
+
+Review the manifest, then run:
+
+```sh
+python3 clear_watch_next.py restore \
+  --device TV_IP:5555 \
+  --backup exports/clear-watch-next/com.android.providers.tv.watch-next-cleared.ab \
+  --manifest exports/clear-watch-next/watch-next-clear-manifest.json
+```
+
+Type `RESTORE com.android.providers.tv` when asked, then approve the restore on the TV if prompted. To restore the original snapshot instead, run the command below and approve it on the TV. This also replaces the current provider data with the earlier snapshot.
+
+```sh
+adb -s TV_IP:5555 restore exports/clear-watch-next/com.android.providers.tv.original.ab
+```
+
+### 3. Verify the TV
+
+Run a new provider backup immediately after restore:
+
+```sh
+python3 clear_watch_next.py verify --device TV_IP:5555
+```
+
+Approve the backup on the TV. A successful verification reports zero rows in `watch_next_programs` and an `ok` SQLite integrity check. The verification backup and report are saved locally under `exports/clear-watch-next/` and remain excluded from Git.
 
 ## SmartTube attribution
 
